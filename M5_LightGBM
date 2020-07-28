@@ -1,0 +1,520 @@
+# Code recorded by Artem Remezov
+
+# One of my solutions for 'M5 Forecasting - Accuracy'
+# (https://www.kaggle.com/c/m5-forecasting-accuracy)
+# based on gradient boosting model
+
+from math import sqrt
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from datetime import date, timedelta
+import statsmodels.api as sm
+import pandas as pd
+import numpy as np
+import warnings
+import itertools
+import matplotlib.pyplot as plt
+import os
+import matplotlib
+from typing import Union
+from tqdm.auto import tqdm as tqdm
+from sklearn.linear_model import LinearRegression
+from math import isnan as math_isnan
+import math, decimal
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import OneHotEncoder
+import lightgbm as lgb
+from IPython.display import FileLink
+
+
+# Credits to multiple Kaggle posts
+def reduce_mem_usage(df, verbose=False):
+    start_mem = df.memory_usage().sum() / 1024 ** 2
+    int_columns = df.select_dtypes(include=["int"]).columns
+    float_columns = df.select_dtypes(include=["float"]).columns
+
+    for col in int_columns:
+        df[col] = pd.to_numeric(df[col], downcast="integer")
+
+    for col in float_columns:
+        df[col] = pd.to_numeric(df[col], downcast="float")
+
+    end_mem = df.memory_usage().sum() / 1024 ** 2
+    if verbose:
+        print(
+            "Mem. usage decreased to {:5.2f} Mb ({:.1f}% reduction)".format(
+                end_mem, 100 * (start_mem - end_mem) / start_mem
+            )
+        )
+    return df
+
+
+# Credits to: https://www.kaggle.com/c/m5-forecasting-accuracy/discussion/154776                        
+def get_moon_phase(d):  # 0=new, 4=full; 4 days/phase
+    dec = decimal.Decimal
+    diff = d - datetime(2001, 1, 1)
+    days = dec(diff.days) + (dec(diff.seconds) / dec(86400))
+    lunations = dec("0.20439731") + (days * dec("0.03386319269"))
+    phase_index = math.floor((lunations % dec(1) * dec(8)) + dec('0.5'))
+    return int(phase_index) & 7                        
+
+
+# Credits to: https://stackoverflow.com/questions/37292872/how-can-i-one-hot-encode-in-python
+def encode_and_bind(original_dataframe, feature_to_encode):
+    dummies = pd.get_dummies(original_dataframe[[feature_to_encode]])
+    res = pd.concat([original_dataframe, dummies], axis=1)
+    res = res.drop([feature_to_encode], axis=1)
+    return(res) 
+
+
+def process_calendar():
+    
+    print('Start processing calendar ... ' + str(datetime.now()))
+    
+    # Converting 'date' to a proper date format
+    calendar['date'] =  pd.to_datetime(calendar['date'], format='%Y-%m-%d')
+
+
+    # Black Friday (https://www.timeanddate.com/holidays/us/black-friday)
+    black_friday_dates = ["2011-11-25", "2012-11-23", "2013-11-29", "2014-11-28", "2015-11-27"]
+
+    for item in black_friday_dates:
+        s = calendar['date']==item
+        calendar.loc[s, 'black_friday'] = 1
+
+    s = calendar['black_friday'].isnull()==True
+    calendar.loc[s, 'black_friday'] = 0       
+
+
+    # Dates of Ramadan
+    Ramadan_dates = [['2011-08-01', '2011-08-30'], 
+                     ['2012-07-20', '2012-08-18'], 
+                     ['2013-07-09', '2013-08-07'], 
+                     ['2014-06-29', '2014-07-27'], 
+                     ['2015-06-18', '2015-07-17'], 
+                     ['2016-06-07', '2016-07-06']]
+
+    for item in Ramadan_dates:
+        s = (calendar['date'] >= item[0]) & (calendar['date'] <= item[1])
+        calendar.loc[s, 'Ramadan'] = 1
+
+    s = calendar['Ramadan'].isnull()==True
+    calendar.loc[s, 'Ramadan'] = 0
+
+
+
+    # Processing default fields from the calendar
+    for item in ['Religous', 'National', 'Cultural', 'Sporting']:
+        s = (calendar['event_type_1']==item)|(calendar['event_type_2']==item)
+        calendar.loc[s, item + '_events'] = 1
+
+    for item in ['Religous_events', 'National_events', 'Cultural_events', 'Sporting_events']:   
+        s = calendar[item].isnull()==True
+        calendar.loc[s, item]=0
+
+
+    # Weekend
+    s = calendar['weekday'].isin(['Saturday', 'Sunday'])
+    calendar.loc[s, 'weekend'] = 1
+    s = calendar['weekend'].isnull()==True
+    calendar.loc[s, 'weekend'] = 0
+
+
+
+    # First day of the month
+    s = calendar['date'].dt.day == 1
+    calendar.loc[s, 'first_day_of_month'] = 1
+    s = calendar['first_day_of_month'].isnull()==True
+    calendar.loc[s, 'first_day_of_month'] = 0
+
+
+    # Seasons
+    for item1, item2 in zip([[12, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], 
+                             ['winter', 'spring', 'summer', 'fall']):
+        s = calendar['date'].dt.month.isin(item1)
+        calendar.loc[s, item2] = 1
+        s = calendar[item2].isnull()==True
+        calendar.loc[s, item2] = 0
+
+    nba_finals_dates = [
+        '2011-05-31', '2011-06-02', '2011-06-05', '2011-06-07',
+        '2011-06-09', '2011-06-12', '2012-06-12', '2012-06-14', 
+        '2012-06-17', '2012-06-19','2012-06-21',  '2013-06-06', 
+        '2013-06-09', '2013-06-11', '2013-06-13', '2013-06-16', 
+        '2013-06-18', '2013-06-20', '2014-06-05', '2014-06-08', 
+        '2014-06-10', '2014-06-12', '2014-06-15', '2015-06-04', 
+        '2015-06-07', '2015-06-09', '2015-06-11', '2015-06-14', 
+        '2015-06-16', '2016-06-02', '2016-06-05', '2016-06-08', 
+        '2016-06-10', '2016-06-13', '2016-06-16', '2016-06-19']
+
+    
+    for item in nba_finals_dates:
+        s = calendar['date']==item
+        calendar.loc[s, 'nba_final'] = 1
+
+    s = calendar['nba_final'].isnull()==True
+    calendar.loc[s, 'nba_final'] = 0    
+
+
+
+    # Fourier terms
+
+    calendar['date_todatetime'] = pd.to_datetime(calendar['date'])
+    calendar['dayofyear'] = calendar['date_todatetime'].dt.dayofyear
+
+    calendar['sin365'] = np.sin(2 * np.pi * calendar['dayofyear']  / 365.25)
+    calendar['cos365'] = np.cos(2 * np.pi * calendar['dayofyear']  / 365.25)
+    calendar['sin365_2'] = np.sin(4 * np.pi * calendar['dayofyear']  / 365.25)
+    calendar['cos365_2'] = np.cos(4 * np.pi * calendar['dayofyear'] / 365.25)
+
+    calendar['week_sin365'] = np.sin(2 * np.pi * calendar['dayofyear']  / 7)
+    calendar['week_cos365'] = np.cos(2 * np.pi * calendar['dayofyear']  / 7)
+    calendar['week_sin365_2'] = np.sin(4 * np.pi * calendar['dayofyear']  / 7)
+    calendar['week_cos365_2'] = np.cos(4 * np.pi * calendar['dayofyear'] / 7)
+
+    calendar['month_sin365'] = np.sin(2 * np.pi * calendar['dayofyear']  / 28)
+    calendar['month_cos365'] = np.cos(2 * np.pi * calendar['dayofyear']  / 28)
+    calendar['month_sin365_2'] = np.sin(4 * np.pi * calendar['dayofyear']  / 28)
+    calendar['month_cos365_2'] = np.cos(4 * np.pi * calendar['dayofyear'] / 28)
+    
+    
+
+    # Moon phases
+    calendar['moon'] = calendar.date.apply(get_moon_phase)
+    
+    print('End processing calendar ... ' + str(datetime.now()))
+   
+
+def add_subsample(input_day, st_day_train, st_day_test, end_day_test, cv_size):
+    
+    # Train, Validation and Test subsample should not overlap in this case!
+    # Train = 1
+    # Validation = 2
+    # Test = 3
+    
+    curr = int(input_day.split('_')[1])
+  
+    end_day_validation = st_day_test - 1
+    st_day_validation = end_day_validation - cv_size + 1
+    
+    end_day_train = st_day_validation - 1    
+
+    #print(st_day_train)
+    #print(end_day_train)
+    #print(st_day_validation)
+    #print(end_day_validation)   
+    #print(st_day_test)
+    #print(end_day_test)  
+    
+
+    if curr >= st_day_train and curr <= end_day_train:
+        res = 1
+    elif curr >= st_day_validation and curr <= end_day_validation:
+        res = 2
+    elif curr >= st_day_test and curr <= end_day_test:
+        res = 3
+        
+    return res
+
+
+def lgbm_val(X_train, X_val, y_train, y_val, cat_features):
+    # create dataset
+    train = lgb.Dataset(X_train, label = y_train, categorical_feature=cat_features)
+    valid = lgb.Dataset(X_val, label = y_val, categorical_feature=cat_features)
+    
+    
+    # parameter setting
+    params1 = {
+        'boosting_type': 'gbdt',
+        'metric': 'rmse',
+        'objective': 'regression',
+        'n_jobs': -1,
+        'seed': 236,
+        'learning_rate': 0.1,
+        'bagging_fraction': 0.75,
+        'bagging_freq': 10, 
+        'colsample_bytree': 0.75}
+    
+    
+    params2 = {
+        'metric': 'rmse',
+        'objective': 'poisson',
+        'n_jobs': -1,
+        'seed': 20,
+        'learning_rate': 0.1,
+        'alpha': 0.1,
+        'lambda': 0.1,
+        'bagging_fraction': 0.66,
+        'bagging_freq': 2, 
+        'colsample_bytree': 0.77}
+    
+    
+    params3 = {
+        'boosting_type': 'gbdt',
+        'objective': 'tweedie',
+        'tweedie_variance_power': 1.1,
+        'metric': 'rmse',
+        'subsample': 0.5,
+        'subsample_freq': 1,
+        'learning_rate': 0.03,
+        'num_leaves': 2**11-1,
+        'min_data_in_leaf': 2**12-1,
+        'feature_fraction': 0.5,
+        'max_bin': 100,
+        'n_estimators': 1400,
+        'boost_from_average': False,
+        'verbose': -1} 
+    
+    
+    params = params1
+    
+    
+    # fitting
+    lgbm = lgb.train(params, 
+                    train,
+                    num_boost_round = 2500,
+                    valid_sets = [valid], 
+                    verbose_eval = False)
+    
+
+    pred_train = lgbm.predict(X_train)
+    pred_val = lgbm.predict(X_val)
+    
+    return pred_train, pred_val, lgbm
+    
+def process_and_create_submission():
+    
+    
+    print('Start processing and creating submission file ... ' + str(datetime.now()))
+    
+    if full_run:
+        ss = ['a']
+    elif partial_run:
+        ss = sales_train_validation[f_name_for_mask].value_counts().index.to_list()
+
+
+
+    cnt = 0
+
+    # Submission file template
+    submission_df = pd.DataFrame(data=None, columns=sample_submission.columns, index=sample_submission.index) 
+    submission_df.drop(submission_df.index[0:submission_df.shape[0]], axis=0, inplace=True)
+
+
+    for curr_item in ss:
+
+        cnt += 1
+        curr_part = cnt
+
+
+        # df of structure: goods in rows, days d_1..d1913 in columns + hierarchy
+        if full_run:
+            input_df = sales_train_validation.loc[:, :]
+        elif partial_run:
+            mask = sales_train_validation[f_name_for_mask]==curr_item
+            input_df = sales_train_validation.loc[mask, :]
+
+
+        # Adding empty columns for future value that we need to predict
+        col_to_add = ['d_'+str(item) for item in range(f_pred_day, l_pred_day+1)]
+        input_df = input_df.reindex(columns=[*input_df.columns.tolist(), *col_to_add], fill_value=np.nan)
+
+
+        # Store the hierarchy
+        cols_hierarchy = ['item_id', 'dept_id', 'cat_id', 'store_id', 'state_id']
+        input_df_hierarchy = input_df[['id'] + cols_hierarchy]
+
+
+        # Deleting the hierarchy columns
+        days_to_delete = ['d_'+str(item) for item in range(1, st_day)]
+        cols_to_delete = days_to_delete + cols_hierarchy 
+        melted_df = input_df.drop(cols_to_delete, axis=1) 
+
+        # Melting
+        melted_df = melted_df.melt(id_vars='id', var_name='d', value_name='Sales')
+
+        melted_df = reduce_mem_usage(melted_df)
+
+
+        # Place the hierarchy ('id', 'item_id', 'dept_id', 'cat_id', 'store_id', 'state_id') back
+        melted_df = melted_df.merge(input_df_hierarchy, how='inner', on='id')
+
+
+        # Adding subsample (1=train, 2=test(for validation), 3=to predict)
+        add_subsample_v = np.vectorize(add_subsample)
+
+        melted_df['subsample'] = add_subsample_v(melted_df['d'], st_day, f_pred_day, l_pred_day, cv_size)
+
+
+        calendar2 = calendar.copy()
+        cols_to_delete = ['date', 'wm_yr_wk', 'weekday', 'wday', 'month', 'year', 
+                          'event_name_1', 'event_type_1', 'event_name_2', 'event_type_2', 'date_todatetime', 'dayofyear']
+        calendar2 = calendar2.drop(cols_to_delete, axis=1)
+
+        melted_df = melted_df.merge(calendar2, how='inner', on='d')
+
+
+        # Adding sell prices
+        melted_df = melted_df.merge(calendar_d_wm, on='d', how='inner')
+        melted_df = melted_df.merge(sell_prices_d_wm, how='left', left_on=['id', 'wm_yr_wk'], right_on=['id', 'wm_yr_wk'])
+        melted_df['sell_price'] = melted_df.groupby(['id'])['sell_price'].transform(lambda x: x.fillna(method='bfill'))
+
+
+        # Thanks to Ragnar123 for the ideas of some baseline features
+        melted_df['lag_price_t1'] = melted_df.groupby(['id'])['sell_price'].transform(lambda x: x.shift(1))
+        melted_df['price_change_t1'] = (melted_df['lag_price_t1'] - melted_df['sell_price']) / (melted_df['lag_price_t1'])
+        melted_df['rolling_price_max_t365'] = melted_df.groupby(['id'])['sell_price'].transform(lambda x: x.shift(1).rolling(365).max())
+        melted_df['price_change_t365'] = (melted_df['rolling_price_max_t365'] - melted_df['sell_price']) / (melted_df['rolling_price_max_t365'])
+        melted_df['rolling_price_std_t7'] = melted_df.groupby(['id'])['sell_price'].transform(lambda x: x.rolling(7).std())
+        melted_df['rolling_price_std_t30'] = melted_df.groupby(['id'])['sell_price'].transform(lambda x: x.rolling(30).std())
+        melted_df.drop(['rolling_price_max_t365', 'lag_price_t1'], inplace = True, axis = 1)
+
+
+        for val in [28, 29, 30]:
+            melted_df[f"shift_t{val}"] = melted_df.groupby(["id"])["Sales"].transform(lambda x: x.shift(val))
+        for val in [7, 30, 60, 90, 180]:
+            melted_df[f"rolling_std_t{val}"] = melted_df.groupby(["id"])["Sales"].transform(lambda x: x.shift(28).rolling(val).std())
+        for val in [7, 30, 60, 90, 180]:
+            melted_df[f"rolling_mean_t{val}"] = melted_df.groupby(["id"])["Sales"].transform(lambda x: x.shift(28).rolling(val).mean())
+
+        melted_df["rolling_skew_t30"] = melted_df.groupby(["id"])["Sales"].transform( lambda x: x.shift(28).rolling(30).skew())
+        melted_df["rolling_kurt_t30"] = melted_df.groupby(["id"])["Sales"].transform(lambda x: x.shift(28).rolling(30).kurt())
+
+
+        # Deleting NaN values after applying 365 - the largest lag
+        mask = melted_df['price_change_t365'].isnull()==False
+        melted_df = melted_df.loc[mask, :]
+        melted_df = melted_df.reset_index()
+
+
+        # Processing categorical features
+        cols_to_encode = ['dept_id', 'cat_id', 'store_id']
+
+        cols_categorical_other = ['snap_CA', 'snap_TX', 'snap_WI', 'black_friday',
+            'Ramadan', 'Religous_events', 'National_events',
+            'Cultural_events', 'Sporting_events', 'weekend',
+            'first_day_of_month', 'winter',
+            'spring', 'summer', 'fall', 'nba_final', 'moon']
+
+        for item in cols_to_encode:
+            melted_df[item] = melted_df[item].astype('category')
+            melted_df[item] = melted_df[item].cat.codes
+            melted_df[item] = melted_df[item].astype('category')
+
+        for item in cols_categorical_other:
+            melted_df[item] = melted_df[item].astype('category')
+
+        #print(melted_df.dtypes)
+
+        melted_df = reduce_mem_usage(melted_df)
+
+
+
+        # Splitting to Train, Test, and a sabsample for predictions
+
+        cols_to_delete = ['Sales', 'index', 'id', 'd', 'item_id', 'state_id', 'subsample', 'wm_yr_wk']
+
+        mask = melted_df['subsample']==1
+        X_train = melted_df.loc[mask, :]
+        y_train = X_train['Sales']
+
+        X_train = X_train.drop(cols_to_delete, axis=1)
+
+
+        mask = melted_df['subsample']==2
+        X_validation = melted_df.loc[mask, :]
+        y_validation = X_validation['Sales']
+
+        X_validation = X_validation.drop(cols_to_delete, axis=1)
+
+
+        mask = melted_df['subsample']==3
+        X_test = melted_df.loc[mask, :]
+        df_prediction_long = X_test[['id', 'd']]
+        X_test = X_test.drop(cols_to_delete, axis=1)
+
+
+        #print(X_train.dtypes)
+        del melted_df
+
+
+        # Training the model
+        # cols_to_encode = list of categorical features declared above
+
+        a, b, lgbm_model = lgbm_val(X_train, X_validation, y_train, y_validation, cols_to_encode + cols_categorical_other)
+
+
+        # Making predictions
+        predictions = lgbm_model.predict(X_test)
+        df_prediction_long['Sales'] = predictions
+        df_prediction_pivot = df_prediction_long.pivot(index='id', columns='d')
+
+
+        # Pivoting predictions and copying to .csv
+        df_prediction_pivot = pd.DataFrame(df_prediction_pivot.to_records())
+
+        cols=['id'] + ['F'+str(item) for item in range(1, 29)]
+        df_prediction_pivot.columns = cols
+
+        df_prediction_pivot = df_prediction_pivot.reset_index()
+        df_prediction_pivot = df_prediction_pivot.drop(['index'], axis=1)
+
+
+
+        df_prediction_eval = df_prediction_pivot.copy()
+
+        # Just copying the same values for d_1942...d_1968, replacing 'validation'->'evaluation' in labels
+        df_prediction_eval['id'] = df_prediction_eval['id'].str.replace('validation', 'evaluation')
+        current_submission_part = pd.concat([df_prediction_pivot, df_prediction_eval])
+
+
+        # Appending to the previous dataframe (in case of partial_run)
+        submission_df = pd.concat([submission_df, current_submission_part], ignore_index=True)
+
+    print('End processing and creating submission file ... ' + str(datetime.now()))    
+    
+    return submission_df
+
+### Main
+# Some constants
+
+folder_path = '/kaggle/input/m5-forecasting-accuracy/'
+calendar_path = folder_path + 'calendar.csv'
+sales_train_validation_path = folder_path + 'sales_train_validation.csv'
+sample_submission_path = folder_path + 'sample_submission.csv'
+sell_prices_path = folder_path + 'sell_prices.csv'   
+
+
+st_day = 1350
+n_to_predict = 28
+cv_size = 28
+f_pred_day = 1914
+l_pred_day = 1941
+f_name_for_mask = 'cat_id'
+
+full_run = True
+partial_run = False
+
+outfile_name = 'submission.csv'
+
+
+# Loading files to dataframes (and small processing)
+calendar, sales_train_validation, sample_submission, sell_prices, calendar_d_wm, sell_prices_d_wm  = load_dataframes()
+
+# Processing calendar
+process_calendar()
+
+
+# Two checks in case of a manual mistake
+if full_run and partial_run:
+    partial_run = False
+if not(full_run or partial_run):
+    full_run = True
+
+
+submission_df = process_and_create_submission()
+
+# Saving the result file to .csv   
+submission_df.to_csv(outfile_name, sep=',', index=False)
