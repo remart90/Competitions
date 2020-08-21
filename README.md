@@ -1,7 +1,7 @@
 Here are some examples of my Python scripts for Machine learning competitions.
 
-'M5 Accuracy' competition hosted by Kaggle (2020) - demand predictions of different goods at Walmart stores;
-2 of my solutions blended together resulted in Top 5% of the final leaderboard (to be honest I was lucky, 
+'M5 Forecasting - Accuracy' competition hosted by Kaggle (2020) - demand predictions of different goods at Walmart stores;
+2 of my solutions blended together resulted in Top 5% (251/5558) of the final leaderboard (to be honest I was lucky, 
 some shake-up occured). Learned about different methods of how to deal with time series.
 
 'Akeed Restaurant Recommendation Challenge' hosted by Zindi (2020) - the goal was to predict orders 
