@@ -14,6 +14,5 @@ some shake-up occured). Learned about different methods of how to deal with time
 of particular customers from particular restaurants. Ranked 49/242 at the final leaderboard. 
 Continued learning about the use of gradient boosting as well as the basics of how to build a recommender system.
 
-'Genetic Engineering Attribution Challenge' hosted by DrivenData
-(https://www.drivendata.org/competitions/63/genetic-engineering-attribution).
+'Genetic Engineering Attribution Challenge' hosted by DrivenData.
 Ranked 209/1211 (Top 18%). Learned about some NLP methods to process the DNA sequences.
