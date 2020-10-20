@@ -1,9 +1,13 @@
 Here are some examples of my Python scripts for Machine learning competitions.
 
 My accounts:
+
 https://www.kaggle.com/artemr90
+
 https://www.drivendata.org/users/Artem_R90
+
 https://zindi.africa/users/Artem_R90
+
 
 Competitions:
 'M5 Forecasting - Accuracy' competition hosted by Kaggle (2020) - demand predictions of different goods at Walmart stores;
