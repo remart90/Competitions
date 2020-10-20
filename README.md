@@ -15,7 +15,7 @@ Competitions:
 some shake-up occured). Learned about different methods of how to deal with time series.
 
 'Akeed Restaurant Recommendation Challenge' hosted by Zindi (2020) - the goal was to predict orders 
-of particular customers from particular restaurants. Ranked 49/242 at the final leaderboard. 
+of particular customers from particular restaurants. Ranked 49/242 (Top 21%) at the final leaderboard. 
 Continued learning about the use of gradient boosting as well as the basics of how to build a recommender system.
 
 'Genetic Engineering Attribution Challenge' hosted by DrivenData.
